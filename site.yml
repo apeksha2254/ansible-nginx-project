@@ -1,0 +1,95 @@
+---
+- name: Provision EC2 instance
+  hosts: localhost
+  gather_facts: no
+
+  vars:
+    key_name: ansible-project
+    instance_type: t2.micro
+    region: us-east-1
+    ami: ami-0fc5d935ebf8bc3bc      
+    security_group: ansible-project    
+
+  tasks:
+    - name: Launch EC2
+      amazon.aws.ec2_instance:
+        name: nginx-ubuntu
+        key_name: "{{ key_name }}"
+        instance_type: "{{ instance_type }}"
+        region: "{{ region }}"
+        image_id: "{{ ami }}"
+        wait: true
+        security_group: "{{ security_group }}"
+      register: ec2
+
+    - name: Add new instance to Ansible inventory
+      add_host:
+        name: "{{ ec2.instances[0].public_ip_address }}"
+        groups: launched
+        ansible_user: ubuntu
+        ansible_ssh_private_key_file: ./ansible-project.pem
+
+    - name: Wait for SSH
+      wait_for:
+        host: "{{ ec2.instances[0].public_ip_address }}"
+        port: 22
+        delay: 10
+        timeout: 300
+        state: started
+
+- name: Configure Docker and Nginx on EC2
+  hosts: launched
+  become: yes
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Start Docker
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Copy custom HTML
+      copy:
+        src: files/index.html
+        dest: /tmp/index.html
+
+    - name: Run Nginx container
+      community.docker.docker_container:
+        name: nginx
+        image: nginx:latest
+        state: started
+        ports:
+          - "80:80"
+        volumes:
+          - /tmp/index.html:/usr/share/nginx/html/index.html:ro
