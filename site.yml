@@ -81,7 +81,7 @@
 
     - name: Copy custom HTML
       copy:
-        src: files/index.html
+        src: ./index.html
         dest: /tmp/index.html
 
     - name: Run Nginx container
